@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Job 1 — Lint: clang-format dry-run + cppcheck static analysis
+  # --------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lint tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-format cppcheck
+
+      - name: Check formatting (clang-format)
+        run: |
+          find src tests \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) | \
+            xargs clang-format --dry-run --Werror --style=file
+
+      - name: Static analysis (cppcheck)
+        run: |
+          cppcheck \
+            --enable=warning,style,performance,portability \
+            --std=c++17 \
+            --suppress=missingIncludeSystem \
+            --error-exitcode=1 \
+            src/ tests/
+
+  # --------------------------------------------------------------------------
+  # Job 2 — Build + Test on Windows
+  # --------------------------------------------------------------------------
+  build:
+    name: Build & Test
+    needs: lint
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone vcpkg
+        run: git clone https://github.com/microsoft/vcpkg.git ${{ runner.temp }}/vcpkg
+
+      - name: Bootstrap vcpkg
+        run: ${{ runner.temp }}/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+        shell: cmd
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg_installed
+          key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-windows-
+
+      - name: Configure
+        env:
+          VCPKG_ROOT: ${{ runner.temp }}/vcpkg
+        run: |
+          cmake --preset debug `
+            -DVCPKG_INSTALLED_DIR="${{ github.workspace }}/vcpkg_installed"
+        shell: pwsh
+
+      - name: Build Debug
+        run: cmake --build --preset debug
+        shell: pwsh
+
+      - name: Test
+        run: ctest --preset debug --output-on-failure --parallel $env:NUMBER_OF_PROCESSORS
+        shell: pwsh
+
+      - name: Configure Release
+        env:
+          VCPKG_ROOT: ${{ runner.temp }}/vcpkg
+        run: |
+          cmake --preset release `
+            -DVCPKG_INSTALLED_DIR="${{ github.workspace }}/vcpkg_installed" `
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
+        shell: pwsh
+
+      - name: Build Release
+        run: cmake --build --preset release
+        shell: pwsh
+
+      - name: Install Release
+        run: cmake --install build/release
+        shell: pwsh
+
+      - name: Bundle freeglut.dll
+        run: |
+          $src = "${{ github.workspace }}/vcpkg_installed/x64-windows/bin/freeglut.dll"
+          $dst = "${{ github.workspace }}/install/bin"
+          if (Test-Path $src) { Copy-Item $src -Destination $dst }
+        shell: pwsh
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-bin
+          path: install/bin/
+
+  # --------------------------------------------------------------------------
+  # Job 3 — Publish Windows artifact to GitHub Releases on tag push
+  # --------------------------------------------------------------------------
+  publish:
+    name: Publish Windows Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release-bin
+          path: install/bin/
+
+      - name: Create release archive
+        run: |
+          cd install/bin
+          zip -r "${{ github.workspace }}/opengl-triangle-${{ github.ref_name }}-windows.zip" .
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: opengl-triangle-${{ github.ref_name }}-windows.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
