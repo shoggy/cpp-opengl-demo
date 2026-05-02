@@ -11,8 +11,8 @@ static inline float lerpf(float a, float b, float t) {
     return a + t * (b - a);
 }
 
-static inline bool pointInTriangle(
-    float px, float py, float ax, float ay, float bx, float by, float cx, float cy) {
+static inline bool pointInTriangle(float px, float py, float ax, float ay, float bx, float by,
+                                   float cx, float cy) {
     auto sign = [](float x1, float y1, float x2, float y2, float x3, float y3) -> float {
         return (x1 - x3) * (y2 - y3) - (x2 - x3) * (y1 - y3);
     };
