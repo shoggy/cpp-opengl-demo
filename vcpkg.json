@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "opengl-triangle",
+  "version": "1.0.0",
+  "description": "Colored triangle demo using FreeGLUT and legacy OpenGL",
+  "dependencies": [
+    "freeglut",
+    "gtest"
+  ]
+}
